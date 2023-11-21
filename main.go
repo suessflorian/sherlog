@@ -10,15 +10,7 @@ import (
 
 	colour "github.com/fatih/color"
 	"github.com/jroimartin/gocui"
-	"github.com/sirupsen/logrus"
 )
-
-type log struct {
-	Level   logrus.Level `json:"level"`
-	Message string       `json:"msg"`
-
-	all map[string]json.RawMessage
-}
 
 const (
 	MAIN_VIEW = "main"
@@ -26,29 +18,11 @@ const (
 
 // WARN: state variables
 var (
-	entries []log
-	focus   int
+	logs  []log
+	focus int
 )
 
-func (l *log) UnmarshalJSON(data []byte) error {
-	all := make(map[string]json.RawMessage)
-	if err := json.Unmarshal(data, &all); err != nil {
-		return err
-	}
-
-	l.all = all
-
-	if err := json.Unmarshal(all["level"], &l.Level); err != nil {
-		return err
-	}
-	if err := json.Unmarshal(all["msg"], &l.Message); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func layout(g *gocui.Gui) error {
+func frame(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
 	if v, err := g.SetView(MAIN_VIEW, 0, 0, maxX-1, maxY-1); err != nil {
 		if !errors.Is(err, gocui.ErrUnknownView) {
@@ -58,10 +32,8 @@ func layout(g *gocui.Gui) error {
 		v.Autoscroll = true
 	}
 
-	for i, entry := range entries {
-		if err := displayLogEntry(g, entry, i); err != nil {
-			panic(err)
-		}
+	if err := displayLogs(g, logs); err != nil {
+		panic(err)
 	}
 
 	return nil
@@ -82,10 +54,10 @@ func keybindings(g *gocui.Gui) error {
 }
 
 func moveDown(g *gocui.Gui, v *gocui.View) error {
-	if focus < len(entries)-1 {
+	if focus < len(logs)-1 {
 		focus++
 		g.Update(func(g *gocui.Gui) error {
-			return layout(g)
+			return frame(g)
 		})
 	}
 	return nil
@@ -95,7 +67,7 @@ func moveUp(g *gocui.Gui, v *gocui.View) error {
 	if focus > 0 {
 		focus--
 		g.Update(func(g *gocui.Gui) error {
-			return layout(g)
+			return frame(g)
 		})
 	}
 	return nil
@@ -105,47 +77,21 @@ func quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
 
-func displayLogEntry(g *gocui.Gui, entry log, index int) error {
-	maxX, _ := g.Size()
-	v, err := g.SetView(fmt.Sprintf("%d", index), 1, index+2, maxX-1, (index+2)*3-1)
-	if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+func displayLogs(g *gocui.Gui, logs []log) error {
+	v, err := g.View(MAIN_VIEW)
+	if err != nil {
 		return err
 	}
 
 	v.Clear()
-	v.Frame = false
-
-	if focus == index {
-		fmt.Fprint(v, colour.HiMagentaString("> "))
+	for i, log := range logs {
+		if focus == i {
+			fmt.Fprintf(v, "> ")
+		}
+		fmt.Fprintln(v, renderedLog(log))
 	}
-	fmt.Fprint(v, renderedLog(entry))
 
 	return nil
-}
-
-func renderedLog(entry log) string {
-	switch entry.Level {
-	case logrus.ErrorLevel:
-		marshalled, err := json.MarshalIndent(entry.all, "", "  ")
-		if err != nil {
-			panic(err)
-		}
-
-		return string(defaultColorize(marshalled, errord))
-	case logrus.DebugLevel:
-		marshalled, err := json.Marshal(entry)
-		if err != nil {
-			panic(err)
-		}
-		return string(defaultColorize(marshalled, debug) + debug.value(fmt.Sprintf(" ... %d hidden fields", len(entry.all)-2)))
-	default:
-		marshalled, err := json.Marshal(entry)
-		if err != nil {
-			panic(err)
-		}
-
-		return string(defaultColorize(marshalled, standard)) + debug.value(fmt.Sprintf(" ... %d hidden fields", len(entry.all)-2))
-	}
 }
 
 func main() {
@@ -155,7 +101,7 @@ func main() {
 	}
 	defer ui.Close()
 
-	ui.SetManagerFunc(layout)
+	ui.SetManagerFunc(frame)
 
 	if err := keybindings(ui); err != nil {
 		panic(err)
@@ -171,13 +117,11 @@ func main() {
 				continue // skip lines that are not valid JSON
 			}
 
-			entries = append(entries, entry)
+			logs = append(logs, entry)
 
 			ui.Update(func(g *gocui.Gui) error {
-				for i, entry := range entries {
-					if err := displayLogEntry(g, entry, i); err != nil {
-						panic(err)
-					}
+				if err := displayLogs(g, logs); err != nil {
+					panic(err)
 				}
 
 				return nil
