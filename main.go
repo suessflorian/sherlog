@@ -21,7 +21,12 @@ type log struct {
 }
 
 const (
-	MAIN = "main"
+	MAIN_VIEW = "main"
+)
+
+// WARN: state variables
+var (
+	entries []log
 )
 
 func (l *log) UnmarshalJSON(data []byte) error {
@@ -44,7 +49,7 @@ func (l *log) UnmarshalJSON(data []byte) error {
 
 func layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
-	if v, err := g.SetView(MAIN, 0, 0, maxX-1, maxY-1); err != nil {
+	if v, err := g.SetView(MAIN_VIEW, 0, 0, maxX-1, maxY-1); err != nil {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
@@ -62,45 +67,48 @@ func quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
 
-func displayLogs(g *gocui.Gui, entries []log) error {
-	v, err := g.View(MAIN)
-	if err != nil {
+func displayLogEntry(g *gocui.Gui, entry log, index int) error {
+	maxX, _ := g.Size()
+	v, err := g.SetView(fmt.Sprintf("%d", index), 1, index+1, maxX-1, (index+1)*3-1)
+	if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 		return err
 	}
+
 	v.Clear()
+	v.Frame = false
 
-	for _, entry := range entries {
-		switch entry.Level {
-		case logrus.ErrorLevel:
-			marshalled, err := json.MarshalIndent(entry.all, "", "  ")
-			if err != nil {
-				panic(err)
-			}
-
-			fmt.Fprintln(v, string(defaultColorize(marshalled, errord)))
-		case logrus.DebugLevel:
-			marshalled, err := json.Marshal(entry)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Fprintln(v, string(defaultColorize(marshalled, debug)))
-			fmt.Fprintln(v, debug.value(fmt.Sprintf(" ... hid %d fields", len(entry.all))))
-		default:
-			marshalled, err := json.Marshal(entry)
-			if err != nil {
-				panic(err)
-			}
-
-			fmt.Fprintln(v, string(defaultColorize(marshalled, standard)))
-			fmt.Fprintln(v, debug.value(fmt.Sprintf(" ... hid %d fields", len(entry.all))))
-		}
-	}
+	fmt.Fprint(v, renderedLog(entry))
 
 	return nil
 }
 
+func renderedLog(entry log) string {
+	switch entry.Level {
+	case logrus.ErrorLevel:
+		marshalled, err := json.MarshalIndent(entry.all, "", "  ")
+		if err != nil {
+			panic(err)
+		}
+
+		return string(defaultColorize(marshalled, errord))
+	case logrus.DebugLevel:
+		marshalled, err := json.Marshal(entry)
+		if err != nil {
+			panic(err)
+		}
+		return string(defaultColorize(marshalled, debug) + debug.value(fmt.Sprintf(" ... %d hidden fields", len(entry.all)-2)))
+	default:
+		marshalled, err := json.Marshal(entry)
+		if err != nil {
+			panic(err)
+		}
+
+		return string(defaultColorize(marshalled, standard)) + debug.value(fmt.Sprintf(" ... %d hidden fields", len(entry.all)-2))
+	}
+}
+
 func main() {
-	ui, err := gocui.NewGui(gocui.OutputNormal)
+	ui, err := gocui.NewGui(gocui.Output256)
 	if err != nil {
 		panic(err)
 	}
@@ -115,8 +123,6 @@ func main() {
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 
-		var entries []log
-
 		for scanner.Scan() {
 			var entry log
 			err := json.Unmarshal([]byte(scanner.Text()), &entry)
@@ -127,7 +133,13 @@ func main() {
 			entries = append(entries, entry)
 
 			ui.Update(func(g *gocui.Gui) error {
-				return displayLogs(ui, entries)
+				for i, entry := range entries {
+					if err := displayLogEntry(g, entry, i); err != nil {
+						panic(err)
+					}
+				}
+
+				return nil
 			})
 		}
 	}()

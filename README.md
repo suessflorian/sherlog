@@ -1,0 +1,2 @@
+- hidden `len(s) - 2` looks awkward
+- `faint` colouring not coming through
