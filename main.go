@@ -3,89 +3,137 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	colour "github.com/fatih/color"
+	"github.com/jroimartin/gocui"
 	"github.com/sirupsen/logrus"
 )
 
-type minimal struct {
+type log struct {
 	Level   logrus.Level `json:"level"`
 	Message string       `json:"msg"`
 
-	extras map[string]json.RawMessage
+	all map[string]json.RawMessage
 }
 
-func (m *minimal) UnmarshalJSON(data []byte) error {
-	extra := make(map[string]json.RawMessage)
-	if err := json.Unmarshal(data, &extra); err != nil {
+const (
+	MAIN = "main"
+)
+
+func (l *log) UnmarshalJSON(data []byte) error {
+	all := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(data, &all); err != nil {
 		return err
 	}
 
-	if err := json.Unmarshal(extra["level"], &m.Level); err != nil {
+	l.all = all
+
+	if err := json.Unmarshal(all["level"], &l.Level); err != nil {
 		return err
 	}
-
-	if err := json.Unmarshal(extra["msg"], &m.Message); err != nil {
+	if err := json.Unmarshal(all["msg"], &l.Message); err != nil {
 		return err
 	}
-
-	delete(extra, "level")
-	delete(extra, "msg")
-
-	m.extras = extra
 
 	return nil
 }
 
-func main() {
-	scanner := bufio.NewScanner(os.Stdin)
-
-	for scanner.Scan() {
-		var entry minimal
-		line := scanner.Text()
-
-		err := json.Unmarshal([]byte(line), &entry)
-		if err != nil {
-			continue // skip lines that are not valid JSON
+func layout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if v, err := g.SetView(MAIN, 0, 0, maxX-1, maxY-1); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
 		}
+		v.Title = "Logs"
+		v.Autoscroll = true
+	}
+	return nil
+}
 
+func keybindings(g *gocui.Gui) error {
+	return g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit)
+}
+
+func quit(g *gocui.Gui, v *gocui.View) error {
+	return gocui.ErrQuit
+}
+
+func displayLogs(g *gocui.Gui, entries []log) error {
+	v, err := g.View(MAIN)
+	if err != nil {
+		return err
+	}
+	v.Clear()
+
+	for _, entry := range entries {
 		switch entry.Level {
 		case logrus.ErrorLevel:
-			var data map[string]any
-			err := json.Unmarshal([]byte(line), &data)
+			marshalled, err := json.MarshalIndent(entry.all, "", "  ")
 			if err != nil {
 				panic(err)
 			}
 
-			marshalled, err := json.MarshalIndent(data, "", "  ")
-			if err != nil {
-				panic(err)
-			}
-
-			fmt.Println(string(defaultColorize(marshalled, errord)))
+			fmt.Fprintln(v, string(defaultColorize(marshalled, errord)))
 		case logrus.DebugLevel:
 			marshalled, err := json.Marshal(entry)
 			if err != nil {
 				panic(err)
 			}
-			fmt.Print(string(defaultColorize(marshalled, debug)))
-			fmt.Print(debug.value(fmt.Sprintf(" ... hid %d fields\n", len(entry.extras))))
+			fmt.Fprintln(v, string(defaultColorize(marshalled, debug)))
+			fmt.Fprintln(v, debug.value(fmt.Sprintf(" ... hid %d fields", len(entry.all))))
 		default:
 			marshalled, err := json.Marshal(entry)
 			if err != nil {
 				panic(err)
 			}
 
-			fmt.Print(string(defaultColorize(marshalled, standard)))
-			fmt.Print(debug.value(fmt.Sprintf(" ... hid %d fields\n", len(entry.extras))))
+			fmt.Fprintln(v, string(defaultColorize(marshalled, standard)))
+			fmt.Fprintln(v, debug.value(fmt.Sprintf(" ... hid %d fields", len(entry.all))))
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+	return nil
+}
+
+func main() {
+	ui, err := gocui.NewGui(gocui.OutputNormal)
+	if err != nil {
+		panic(err)
+	}
+	defer ui.Close()
+
+	ui.SetManagerFunc(layout)
+
+	if err := keybindings(ui); err != nil {
+		panic(err)
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+
+		var entries []log
+
+		for scanner.Scan() {
+			var entry log
+			err := json.Unmarshal([]byte(scanner.Text()), &entry)
+			if err != nil {
+				continue // skip lines that are not valid JSON
+			}
+
+			entries = append(entries, entry)
+
+			ui.Update(func(g *gocui.Gui) error {
+				return displayLogs(ui, entries)
+			})
+		}
+	}()
+
+	if err := ui.MainLoop(); err != nil && !errors.Is(err, gocui.ErrQuit) {
+		panic(err)
 	}
 }
 
