@@ -27,6 +27,7 @@ const (
 // WARN: state variables
 var (
 	entries []log
+	focus   int
 )
 
 func (l *log) UnmarshalJSON(data []byte) error {
@@ -56,11 +57,48 @@ func layout(g *gocui.Gui) error {
 		v.Title = "Logs"
 		v.Autoscroll = true
 	}
+
+	for i, entry := range entries {
+		if err := displayLogEntry(g, entry, i); err != nil {
+			panic(err)
+		}
+	}
+
 	return nil
 }
 
 func keybindings(g *gocui.Gui) error {
-	return g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit)
+	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding("", 'k', gocui.ModNone, moveUp); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding("", 'j', gocui.ModNone, moveDown); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func moveDown(g *gocui.Gui, v *gocui.View) error {
+	if focus < len(entries)-1 {
+		focus++
+		g.Update(func(g *gocui.Gui) error {
+			return layout(g)
+		})
+	}
+	return nil
+}
+
+func moveUp(g *gocui.Gui, v *gocui.View) error {
+	if focus > 0 {
+		focus--
+		g.Update(func(g *gocui.Gui) error {
+			return layout(g)
+		})
+	}
+	return nil
 }
 
 func quit(g *gocui.Gui, v *gocui.View) error {
@@ -69,7 +107,7 @@ func quit(g *gocui.Gui, v *gocui.View) error {
 
 func displayLogEntry(g *gocui.Gui, entry log, index int) error {
 	maxX, _ := g.Size()
-	v, err := g.SetView(fmt.Sprintf("%d", index), 1, index+1, maxX-1, (index+1)*3-1)
+	v, err := g.SetView(fmt.Sprintf("%d", index), 1, index+2, maxX-1, (index+2)*3-1)
 	if err != nil && !errors.Is(err, gocui.ErrUnknownView) {
 		return err
 	}
@@ -77,6 +115,9 @@ func displayLogEntry(g *gocui.Gui, entry log, index int) error {
 	v.Clear()
 	v.Frame = false
 
+	if focus == index {
+		fmt.Fprint(v, colour.HiMagentaString("> "))
+	}
 	fmt.Fprint(v, renderedLog(entry))
 
 	return nil
