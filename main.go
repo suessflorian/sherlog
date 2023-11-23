@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
-	colour "github.com/fatih/color"
 	"github.com/jroimartin/gocui"
 )
 
@@ -132,66 +130,4 @@ func main() {
 	if err := ui.MainLoop(); err != nil && !errors.Is(err, gocui.ErrQuit) {
 		panic(err)
 	}
-}
-
-type colouriser struct {
-	key     func(a ...interface{}) string
-	value   func(a ...interface{}) string
-	bracket func(a ...interface{}) string
-}
-
-var (
-	errord = colouriser{
-		key:     colour.New(colour.FgRed, colour.Bold).SprintFunc(),
-		value:   colour.New(colour.FgGreen).SprintFunc(),
-		bracket: colour.New(colour.FgWhite, colour.Bold).SprintFunc(),
-	}
-	standard = colouriser{
-		key:     colour.New(colour.FgBlue, colour.Bold).SprintFunc(),
-		value:   colour.New(colour.FgGreen).SprintFunc(),
-		bracket: colour.New(colour.FgWhite, colour.Bold).SprintFunc(),
-	}
-	debug = colouriser{
-		key:     colour.New(colour.FgHiWhite, colour.Faint).SprintFunc(),
-		value:   colour.New(colour.FgHiWhite, colour.Faint).SprintFunc(),
-		bracket: colour.New(colour.FgHiWhite, colour.Faint).SprintFunc(),
-	}
-)
-
-func defaultColorize(raw json.RawMessage, colouriser colouriser) string {
-	var (
-		insideQuotes bool
-		parsingKey   bool = true
-	)
-
-	var result strings.Builder
-
-	for _, rune := range raw {
-		switch {
-		case rune == '"':
-			insideQuotes = !insideQuotes
-
-			if parsingKey {
-				result.WriteString(colouriser.key(string(rune)))
-			} else {
-				result.WriteString(colouriser.value(string(rune)))
-			}
-		case !insideQuotes && (rune == '{' || rune == '}' || rune == '[' || rune == ']' || rune == ':'):
-			if rune == ':' {
-				parsingKey = !parsingKey
-			}
-			result.WriteString(colouriser.bracket(string(rune)))
-		case !insideQuotes && rune == ',':
-			parsingKey = true
-			result.WriteString(colouriser.bracket(string(rune)))
-		case insideQuotes && parsingKey:
-			result.WriteString(colouriser.key(string(rune)))
-		case insideQuotes && !parsingKey:
-			result.WriteString(colouriser.value(string(rune)))
-		default:
-			result.WriteString(string(rune))
-		}
-	}
-
-	return result.String()
 }
