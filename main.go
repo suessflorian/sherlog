@@ -12,12 +12,15 @@ import (
 
 const (
 	MAIN_VIEW = "main"
+	ZOOM_VIEW = "zoomed"
 )
 
 // WARN: state variables
 var (
 	feed    []log
 	focused []log
+
+	zoomed bool
 
 	// log cursor position
 	cursor int
@@ -36,8 +39,8 @@ func live(ui *gocui.Gui) error {
 	return nil
 }
 
-func renderLogs(g *gocui.Gui, logs []log, cursor int) error {
-	v, err := g.View(MAIN_VIEW)
+func renderLogs(ui *gocui.Gui, logs []log, cursor int) error {
+	v, err := ui.View(MAIN_VIEW)
 	if err != nil {
 		return err
 	}
@@ -48,7 +51,31 @@ func renderLogs(g *gocui.Gui, logs []log, cursor int) error {
 		if len(logs)-(cursor+1) == i {
 			fmt.Fprintf(v, "> ")
 		}
-		fmt.Fprintln(v, renderedLog(log))
+		fmt.Fprintln(v, renderPacked(log))
+	}
+
+	return nil
+}
+
+func zoomLog(ui *gocui.Gui, log log) error {
+	zoomed = true
+
+	maxX, maxY := ui.Size()
+	width, height := maxX/2, maxY/2
+
+	startX := (maxX - width) / 2
+	startY := (maxY - height) / 2
+	endX := startX + width
+	endY := startY + height
+
+	if v, err := ui.SetView(ZOOM_VIEW, startX, startY, endX, endY); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+		v.Title = log.Message
+		v.Autoscroll = true
+
+		fmt.Fprintln(v, renderUnpacked(log))
 	}
 
 	return nil
@@ -59,6 +86,9 @@ func keybindings(ui *gocui.Gui) error {
 		return err
 	}
 	if err := ui.SetKeybinding("", 'q', gocui.ModNone, quit); err != nil {
+		return err
+	}
+	if err := ui.SetKeybinding("", gocui.KeyEnter, gocui.ModNone, zoomIntoLog); err != nil {
 		return err
 	}
 	if err := ui.SetKeybinding("", gocui.KeyEsc, gocui.ModNone, clearFocus); err != nil {
@@ -72,6 +102,19 @@ func keybindings(ui *gocui.Gui) error {
 	}
 
 	return nil
+}
+
+func zoomIntoLog(g *gocui.Gui, v *gocui.View) error {
+	if focused == nil {
+		return nil
+	}
+
+	logIndex := len(focused) - (cursor + 1)
+	if logIndex < 0 || logIndex >= len(focused) {
+		return nil
+	}
+
+	return zoomLog(g, feed[logIndex])
 }
 
 func moveDown(g *gocui.Gui, v *gocui.View) error {
@@ -94,10 +137,15 @@ func moveUp(g *gocui.Gui, v *gocui.View) error {
 	return renderLogs(g, focused, cursor)
 }
 
-func clearFocus(g *gocui.Gui, v *gocui.View) error {
+func clearFocus(ui *gocui.Gui, v *gocui.View) error {
+	if zoomed {
+		zoomed = false
+		return ui.DeleteView(ZOOM_VIEW)
+	}
+
 	focused = nil // remove focus
 	cursor = 0    // reset cursor
-	return renderLogs(g, feed, cursor)
+	return renderLogs(ui, feed, cursor)
 }
 
 func quit(g *gocui.Gui, v *gocui.View) error {

@@ -35,7 +35,7 @@ func (l *log) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func renderedLog(entry log) string {
+func renderPacked(entry log) string {
 	switch entry.Level {
 	case logrus.ErrorLevel:
 		marshalled, err := json.Marshal(entry.all)
@@ -57,6 +57,25 @@ func renderedLog(entry log) string {
 		}
 
 		return string(defaultColorize(marshalled, standard)) + debug.value(fmt.Sprintf(" ... %d hidden fields", len(entry.all)-2))
+	}
+}
+
+func renderUnpacked(entry log) string {
+	switch entry.Level {
+	case logrus.ErrorLevel:
+		marshalled, err := json.MarshalIndent(entry.all, "", " ")
+		if err != nil {
+			panic(err)
+		}
+
+		return string(defaultColorize(marshalled, errord))
+	default:
+		marshalled, err := json.MarshalIndent(entry.all, "", " ")
+		if err != nil {
+			panic(err)
+		}
+
+		return string(defaultColorize(marshalled, standard))
 	}
 }
 
