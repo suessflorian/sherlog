@@ -38,7 +38,7 @@ func (l *log) UnmarshalJSON(data []byte) error {
 func renderedLog(entry log) string {
 	switch entry.Level {
 	case logrus.ErrorLevel:
-		marshalled, err := json.MarshalIndent(entry.all, "", "  ")
+		marshalled, err := json.Marshal(entry.all)
 		if err != nil {
 			panic(err)
 		}

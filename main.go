@@ -16,13 +16,16 @@ const (
 
 // WARN: state variables
 var (
-	logs  []log
-	focus int
+	feed    []log
+	focused []log
+
+	// log cursor position
+	cursor int
 )
 
-func frame(g *gocui.Gui) error {
-	maxX, maxY := g.Size()
-	if v, err := g.SetView(MAIN_VIEW, 0, 0, maxX-1, maxY-1); err != nil {
+func live(ui *gocui.Gui) error {
+	maxX, maxY := ui.Size()
+	if v, err := ui.SetView(MAIN_VIEW, 0, 0, maxX-1, maxY-1); err != nil {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
@@ -30,21 +33,41 @@ func frame(g *gocui.Gui) error {
 		v.Autoscroll = true
 	}
 
-	if err := displayLogs(g, logs); err != nil {
-		panic(err)
+	return nil
+}
+
+func renderLogs(g *gocui.Gui, logs []log, cursor int) error {
+	v, err := g.View(MAIN_VIEW)
+	if err != nil {
+		return err
+	}
+
+	v.Clear()
+
+	for i, log := range logs {
+		if len(logs)-(cursor+1) == i {
+			fmt.Fprintf(v, "> ")
+		}
+		fmt.Fprintln(v, renderedLog(log))
 	}
 
 	return nil
 }
 
-func keybindings(g *gocui.Gui) error {
-	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+func keybindings(ui *gocui.Gui) error {
+	if err := ui.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		return err
 	}
-	if err := g.SetKeybinding("", 'k', gocui.ModNone, moveUp); err != nil {
+	if err := ui.SetKeybinding("", 'q', gocui.ModNone, quit); err != nil {
 		return err
 	}
-	if err := g.SetKeybinding("", 'j', gocui.ModNone, moveDown); err != nil {
+	if err := ui.SetKeybinding("", gocui.KeyEsc, gocui.ModNone, clearFocus); err != nil {
+		return err
+	}
+	if err := ui.SetKeybinding("", 'k', gocui.ModNone, moveUp); err != nil {
+		return err
+	}
+	if err := ui.SetKeybinding("", 'j', gocui.ModNone, moveDown); err != nil {
 		return err
 	}
 
@@ -52,44 +75,33 @@ func keybindings(g *gocui.Gui) error {
 }
 
 func moveDown(g *gocui.Gui, v *gocui.View) error {
-	if focus < len(logs)-1 {
-		focus++
-		g.Update(func(g *gocui.Gui) error {
-			return frame(g)
-		})
+	if focused == nil {
+		focused = feed[:]
 	}
-	return nil
+	if cursor > 0 {
+		cursor--
+	}
+	return renderLogs(g, focused, cursor)
 }
 
 func moveUp(g *gocui.Gui, v *gocui.View) error {
-	if focus > 0 {
-		focus--
-		g.Update(func(g *gocui.Gui) error {
-			return frame(g)
-		})
+	if focused == nil {
+		focused = feed[:]
 	}
-	return nil
+	if cursor < (len(focused) - 1) {
+		cursor++
+	}
+	return renderLogs(g, focused, cursor)
+}
+
+func clearFocus(g *gocui.Gui, v *gocui.View) error {
+	focused = nil // remove focus
+	cursor = 0    // reset cursor
+	return renderLogs(g, feed, cursor)
 }
 
 func quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
-}
-
-func displayLogs(g *gocui.Gui, logs []log) error {
-	v, err := g.View(MAIN_VIEW)
-	if err != nil {
-		return err
-	}
-
-	v.Clear()
-	for i, log := range logs {
-		if focus == i {
-			fmt.Fprintf(v, "> ")
-		}
-		fmt.Fprintln(v, renderedLog(log))
-	}
-
-	return nil
 }
 
 func main() {
@@ -99,7 +111,8 @@ func main() {
 	}
 	defer ui.Close()
 
-	ui.SetManagerFunc(frame)
+	ui.SetManagerFunc(live)
+	ui.InputEsc = true
 
 	if err := keybindings(ui); err != nil {
 		panic(err)
@@ -115,11 +128,13 @@ func main() {
 				continue // skip lines that are not valid JSON
 			}
 
-			logs = append(logs, entry)
+			feed = append(feed, entry)
 
 			ui.Update(func(g *gocui.Gui) error {
-				if err := displayLogs(g, logs); err != nil {
-					panic(err)
+				if focused == nil {
+					if err := renderLogs(g, feed, 0); err != nil {
+						return err
+					}
 				}
 
 				return nil
