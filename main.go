@@ -19,13 +19,13 @@ const (
 )
 
 func main() {
-	file, err := os.OpenFile("main.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("main.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		panic("cannot spin up log file: " + err.Error())
 	}
-	defer file.Close()
+	defer f.Close()
 
-	lg := slog.New(slog.NewJSONHandler(file, nil))
+	lg := slog.New(slog.NewJSONHandler(f, nil))
 	slog.SetDefault(lg)
 
 	ui, err := gocui.NewGui(gocui.Output256)
@@ -41,7 +41,7 @@ func main() {
 			if !errors.Is(err, gocui.ErrUnknownView) {
 				return err
 			}
-			v.Title = "Logs"
+			v.Title = fmt.Sprintf("Logs (Processed: %d, Dropped: %d, Focused: %d)", len(feed), dropped, len(focused))
 			v.Autoscroll = true
 		}
 
@@ -62,12 +62,20 @@ func main() {
 			var entry log
 			err := json.Unmarshal([]byte(scanner.Text()), &entry)
 			if err != nil {
+				dropped++
 				continue // skip lines that are not valid JSON
 			}
 
 			feed = append(feed, entry)
 
 			ui.Update(func(g *gocui.Gui) error {
+				v, err := ui.View(MAIN_VIEW)
+				if err != nil {
+					return err
+				}
+
+				v.Title = fmt.Sprintf("Logs (Processed: %d, Dropped: %d, Focused: %d)", len(feed), dropped, len(focused))
+
 				if focused == nil {
 					if err := renderLogs(g, feed, 0); err != nil {
 						return err
@@ -89,6 +97,7 @@ func main() {
 
 var (
 	feed    []log
+	dropped int
 	focused []log
 
 	zoomed    bool
@@ -105,6 +114,7 @@ func renderLogs(ui *gocui.Gui, logs []log, cursor int) error {
 	}
 
 	v.Clear()
+	v.Title = fmt.Sprintf("Logs (Processed: %d, Dropped: %d, Focused: %d)", len(feed), dropped, len(focused))
 
 	for i, log := range logs {
 		if len(logs)-(cursor+1) == i {
