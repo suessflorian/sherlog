@@ -35,7 +35,19 @@ func main() {
 	}
 	defer ui.Close()
 
-	ui.SetManagerFunc(live)
+	ui.SetManagerFunc(func(ui *gocui.Gui) error {
+		maxX, maxY := ui.Size()
+		if v, err := ui.SetView(MAIN_VIEW, 0, 0, maxX-1, maxY-1); err != nil {
+			if !errors.Is(err, gocui.ErrUnknownView) {
+				return err
+			}
+			v.Title = "Logs"
+			v.Autoscroll = true
+		}
+
+		return nil
+	})
+
 	ui.InputEsc = true
 
 	if err := keybindings(ui); err != nil {
@@ -68,7 +80,7 @@ func main() {
 	}()
 
 	if err := ui.MainLoop(); err != nil && !errors.Is(err, gocui.ErrQuit) {
-		slog.Default().With("err", err.Error()).Error("failed to set keybindings")
+		slog.Default().With("err", err.Error()).Error("failed during main loop")
 		os.Exit(1)
 	}
 
@@ -85,19 +97,6 @@ var (
 	// log cursor position
 	cursor int
 )
-
-func live(ui *gocui.Gui) error {
-	maxX, maxY := ui.Size()
-	if v, err := ui.SetView(MAIN_VIEW, 0, 0, maxX-1, maxY-1); err != nil {
-		if !errors.Is(err, gocui.ErrUnknownView) {
-			return err
-		}
-		v.Title = "Logs"
-		v.Autoscroll = true
-	}
-
-	return nil
-}
 
 func renderLogs(ui *gocui.Gui, logs []log, cursor int) error {
 	v, err := ui.View(MAIN_VIEW)
@@ -236,7 +235,7 @@ func enterKey(g *gocui.Gui, v *gocui.View) error {
 			cursor = len(focused) - 1
 		}
 
-		return renderLogs(g, focused, 0)
+		return renderLogs(g, focused, cursor)
 	}
 
 	if focused == nil {
@@ -248,7 +247,7 @@ func enterKey(g *gocui.Gui, v *gocui.View) error {
 		return nil
 	}
 
-	return zoomLog(g, feed[logIndex])
+	return zoomLog(g, focused[logIndex])
 }
 
 func moveDown(g *gocui.Gui, v *gocui.View) error {
