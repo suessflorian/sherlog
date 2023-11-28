@@ -15,6 +15,11 @@ type log struct {
 	Message string       `json:"msg"`
 
 	all map[string]json.RawMessage
+	raw []byte
+}
+
+func (l *log) Matches(pattern string) bool {
+	return strings.Contains(string(l.raw), pattern)
 }
 
 func (l *log) UnmarshalJSON(data []byte) error {
@@ -23,14 +28,15 @@ func (l *log) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	l.all = all
-
 	if err := json.Unmarshal(all["level"], &l.Level); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(all["msg"], &l.Message); err != nil {
 		return err
 	}
+
+	l.all = all
+	l.raw = data
 
 	return nil
 }
